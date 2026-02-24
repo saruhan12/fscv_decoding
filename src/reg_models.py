@@ -12,20 +12,20 @@ class Regressor(nn.Module):
             nn.Softplus()
         )
 
-        def forward(self,x):
-            w_att = self.attention(x).softmax(dim=1)
-            x = (x*w_att).sum(dim=1)
-            return self.head(x)
+    def forward(self,x):
+        w_att = self.attention(x).softmax(dim=1)
+        x = (x*w_att).sum(dim=1)
+        return self.head(x)
 
 def train_regressor(model, train_data_loader,val_loader, loss, optimizer, device="cpu", num_epochs=100):
     train_losses, val_losses = [], []
-
+    model.to(device)
     for epoch in range(num_epochs):
-        inputs, targets = inputs.to(device), targets.to(device)
         model.train()
         run_loss = 0.0
 
         for inputs, targets in train_data_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
             out = model(inputs)
             l = loss(out,targets)
@@ -52,6 +52,7 @@ def train_regressor(model, train_data_loader,val_loader, loss, optimizer, device
     return train_losses
 
 def test_regressor(model, test_data_loader, loss, device='cpu'):
+    model.to(device)
     model.eval()
     test_loss = 0.0
     all_preds, all_targets = [], []
