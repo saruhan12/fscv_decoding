@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 
-
 class Regressor(nn.Module):
     def __init__(self, n_exp, n_neuromodul,hidden_dim=64):
         super().__init__()
@@ -18,7 +17,7 @@ class Regressor(nn.Module):
             x = (x*w_att).sum(dim=1)
             return self.head(x)
 
-def train_regressor(model, train_data_loader,val_loader, loss, optimizer,device="cpu", num_epochs=100):
+def train_regressor(model, train_data_loader,val_loader, loss, optimizer, device="cpu", num_epochs=100):
     train_losses, val_losses = [], []
 
     for epoch in range(num_epochs):
