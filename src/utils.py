@@ -31,15 +31,58 @@ def get_activation_label_pair(paths):
 
 def load_activation_data(paths, batch_size=8, shuffle=True, num_workers=0):
     act_arr, lbl_arr = get_activation_label_pair(paths)
-    X_train, X_test, y_train, y_test = train_test_split(act_arr, lbl_arr, test_size=0.2, random_state=42)
-    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.1, random_state=42)
+    print(np.unique(lbl_arr[:, 0, :3], axis=0))  # unique [DA, 5HT, NE] combinations
+    print(f"Total conditions: {lbl_arr.shape[0]}")
+    print(f"Unique combinations: {len(np.unique(lbl_arr[:, 0, :3], axis=0))}")
+    unique, counts = np.unique(lbl_arr[:, 0, :3], axis=0, return_counts=True)
+    print("Duplicated conditions:")
+    for u, c in zip(unique, counts):
+        if c > 1:
+            print(f"  DA={u[0]}, 5HT={u[1]}, NE={u[2]} — appears {c} times")
+
+            
+    lbl_arr = lbl_arr[:,:,:3]
+
+    n_concentrations = act_arr.shape[0]
+
+    indices = np.arange(n_concentrations)
+
+    train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
+    train_idx, val_idx = train_test_split(train_idx, test_size=0.1, random_state=42)
+
+    X_train = act_arr[train_idx].reshape(-1, 1000, 80)
+    y_train = lbl_arr[train_idx].reshape(-1, 3)
+
+    X_test = act_arr[test_idx].reshape(-1, 1000, 80)
+    y_test = lbl_arr[test_idx].reshape(-1, 3)
+
+    X_val = act_arr[val_idx].reshape(-1, 1000, 80)
+    y_val = lbl_arr[val_idx].reshape(-1, 3)
     
-    data_train = ActivationData(X_train, y_train)
+    y_mean = y_train.mean(axis=0)
+    y_std = y_train.std(axis=0)
+    
+    x_mean = X_train.mean(axis=0)
+    x_std = X_train.std(axis=0)
+
+
+    X_train_norm = (X_train - x_mean)/(x_std + 1e-8)
+    X_test_norm = (X_test - x_mean)/(x_std + 1e-8)
+    X_val_norm = (X_val - x_mean)/(x_std + 1e-8)
+
+    print(f"y_train mean: {y_mean}; std:{y_std}")
+
+    y_train_norm = (y_train - y_mean) / (y_std + 1e-8)
+    y_val_norm   = (y_val   - y_mean) / (y_std + 1e-8)  
+    y_test_norm  = (y_test  - y_mean) / (y_std + 1e-8)
+    
+    data_train = ActivationData(X_train_norm, y_train_norm)
     train_dataloader = DataLoader(data_train, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
 
-    data_val = ActivationData(X_val, y_val)
-    val_dataloader = DataLoader(data_train, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+    data_val = ActivationData(X_val_norm, y_val_norm)
+    val_dataloader = DataLoader(data_val, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
 
-    data_test= ActivationData(X_test, y_test)
+    data_test= ActivationData(X_test_norm, y_test_norm)
     test_dataloader = DataLoader(data_test, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+
     return train_dataloader, val_dataloader, test_dataloader

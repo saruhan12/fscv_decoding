@@ -2,14 +2,17 @@ import torch
 from torch import nn
 
 class Regressor(nn.Module):
-    def __init__(self, n_exp, n_neuromodul,hidden_dim=64):
+    def __init__(self, n_exp, n_neuromodul,hidden_dim1=64, hidden_dim2=128):
         super().__init__()
         self.attention = nn.Linear(n_exp, 1)
         self.head = nn.Sequential(
-            nn.Linear(n_exp,hidden_dim),
+            nn.Linear(n_exp,hidden_dim1),
             nn.ReLU(),
-            nn.Linear(hidden_dim,n_neuromodul),
-            nn.Softplus()
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim1,hidden_dim2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim2, n_neuromodul)#,
+            #nn.Softplus()
         )
 
     def forward(self,x):
@@ -47,8 +50,9 @@ def train_regressor(model, train_data_loader,val_loader, loss, optimizer, device
 
             ep_val_loss = val_loss/len(val_loader.dataset)
             val_losses.append(ep_val_loss)
-        if (epoch+1)%10 == 0:
-            print(f"Epoch {epoch}/{num_epochs}| Train Loss: {ep_train_loss:.4f}| Val Loss: {ep_val_loss:.4f}")
+        if (epoch+1)%5 == 0:
+            print(f"Epoch {epoch+1}/{num_epochs}| Train Loss: {ep_train_loss:.4f}| Val Loss: {ep_val_loss:.4f}")
+
     return train_losses
 
 def test_regressor(model, test_data_loader, loss, device='cpu'):
