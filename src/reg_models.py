@@ -1,27 +1,42 @@
 import torch
 from torch import nn
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 class Regressor(nn.Module):
-    def __init__(self, n_exp, n_neuromodul,hidden_dim1=64, hidden_dim2=128):
+    def __init__(self, n_exp, n_neuromodul,hidden_dim1=64, hidden_dim2=128, pooling='attention'):
         super().__init__()
+        self.pool = pooling
+
+        input_dim = n_exp if pooling != 'none' else n_exp*1000
+
         self.attention = nn.Linear(n_exp, 1)
         self.head = nn.Sequential(
-            nn.Linear(n_exp,hidden_dim1),
+            nn.Linear(input_dim,hidden_dim1),
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(hidden_dim1,hidden_dim2),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(hidden_dim2, n_neuromodul)#,
             #nn.Softplus()
         )
 
-    def forward(self,x):
-        w_att = self.attention(x).softmax(dim=1)
-        x = (x*w_att).sum(dim=1)
+    def forward(self, x):
+        if self.pool == 'attention':
+            w_att = self.attention(x).softmax(dim=1)
+            x = (x*w_att).sum(dim=1)
+        elif self.pool == 'mean':
+            x = x.mean(dim=1)
+        elif self.pool == 'none':
+            x = x.reshape(x.size(0),-1)
+
         return self.head(x)
 
 def train_regressor(model, train_data_loader,val_loader, loss, optimizer, device="cpu", num_epochs=100):
     train_losses, val_losses = [], []
+
+    scheduler = ReduceLROnPlateau(optimizer=optimizer, mode='min', factor=0.5, patience=10)
+
     model.to(device)
     for epoch in range(num_epochs):
         model.train()
@@ -50,12 +65,14 @@ def train_regressor(model, train_data_loader,val_loader, loss, optimizer, device
 
             ep_val_loss = val_loss/len(val_loader.dataset)
             val_losses.append(ep_val_loss)
-        if (epoch+1)%5 == 0:
+            scheduler.step(ep_val_loss)
+
+        if (epoch+1)%10 == 0:
             print(f"Epoch {epoch+1}/{num_epochs}| Train Loss: {ep_train_loss:.4f}| Val Loss: {ep_val_loss:.4f}")
 
     return train_losses
 
-def test_regressor(model, test_data_loader, loss, device='cpu'):
+def test_regressor(model, test_data_loader, loss, y_mean, y_std, device='cpu'):
     model.to(device)
     model.eval()
     test_loss = 0.0
@@ -78,4 +95,11 @@ def test_regressor(model, test_data_loader, loss, device='cpu'):
     all_targets = torch.cat(all_targets)
     mae = (all_preds - all_targets).abs().mean(dim=0)
 
-    return avg_loss, mae, all_preds, all_targets
+    y_mean = torch.tensor(y_mean, dtype=torch.float32)
+    y_std  = torch.tensor(y_std,  dtype=torch.float32)
+
+    all_preds_nM   = all_preds   * y_std + y_mean
+    all_targets_nM = all_targets * y_std + y_mean
+    mae_nM = (all_preds_nM - all_targets_nM).abs().mean(dim=0)
+
+    return avg_loss, mae, mae_nM, all_preds_nM, all_targets_nM

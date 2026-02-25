@@ -31,9 +31,8 @@ def get_activation_label_pair(paths):
 
 def load_activation_data(paths, batch_size=8, shuffle=True, num_workers=0):
     act_arr, lbl_arr = get_activation_label_pair(paths)
-    print(np.unique(lbl_arr[:, 0, :3], axis=0))  # unique [DA, 5HT, NE] combinations
-    print(f"Total conditions: {lbl_arr.shape[0]}")
-    print(f"Unique combinations: {len(np.unique(lbl_arr[:, 0, :3], axis=0))}")
+    print("Expert activation set shape: ", act_arr.shape)
+    print("Labels(concentrations) shape: ", lbl_arr.shape)
     unique, counts = np.unique(lbl_arr[:, 0, :3], axis=0, return_counts=True)
     print("Duplicated conditions:")
     for u, c in zip(unique, counts):
@@ -85,4 +84,4 @@ def load_activation_data(paths, batch_size=8, shuffle=True, num_workers=0):
     data_test= ActivationData(X_test_norm, y_test_norm)
     test_dataloader = DataLoader(data_test, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
 
-    return train_dataloader, val_dataloader, test_dataloader
+    return train_dataloader, val_dataloader, test_dataloader, y_mean, y_std
