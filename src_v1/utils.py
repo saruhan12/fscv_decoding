@@ -7,12 +7,18 @@ from sklearn.model_selection import train_test_split
 
 MONO_DOM_LIST = {0:'DA', 1:'5HT', 2:'NE', 3:'EQ'}
 
-def get_all_paths(path, collapsed=True, steps=None):
-    path = Path(path)
+def get_all_paths(path_folder, collapsed=True, steps=None, volta=False):
+    path = Path(path_folder)
     if steps:
-        search = path.rglob(f"weights_collapsed_{steps}steps.npy")if collapsed else path.rglob(f"weights_{steps}steps.npy")
+        if volta:
+            search = path.rglob("voltammograms.npy")
+        else:
+            search = path.rglob(f"weights_collapsed_{steps}steps.npy")if collapsed else path.rglob(f"weights_{steps}steps.npy")
     else:
-        search = path.rglob("weights_collapsed.npy")if collapsed else path.rglob("weights.npy")
+        if volta:
+            search = path.rglob("voltammograms.npy")
+        else:
+            search = path.rglob("weights_collapsed.npy")if collapsed else path.rglob("weights.npy")
     weight_paths = [p.parent for p in search]
 
     return weight_paths
@@ -29,34 +35,44 @@ class ActivationData(Dataset):
     def __getitem__(self, index):
         return torch.tensor(self.activation[index], dtype=torch.float32), torch.tensor(self.label[index], dtype=torch.float32), torch.tensor(self.concentration[index], dtype=torch.float32) 
     
-def get_activation_label_pair(paths, collapsed= True):
+def get_activation_label_pair(path_folder, collapsed = True, volta=False):
     act_arr = []
     lbl_arr = []
+    
+    paths = get_all_paths(path_folder=path_folder,collapsed=collapsed,volta=volta)
+
     if collapsed:
         print('Getting pairs collapsed.')
     else:
         print('Getting pairs not collapsed.')
 
     for k in paths:
-        act = np.load(k / "weights_collapsed.npy") if collapsed else np.load(k / "weights.npy")
-        lbl = np.load(k / "labels.npy")
+        shape_get = np.load(k / "voltammograms.npy")
+        N, T, sweep = shape_get.shape
+        if volta:
+            act = np.load(k / "voltammograms.npy")
+            lbl = np.load(k / "labels.npy")
+            if collapsed:
+                act = act.mean(axis=2,keepdims=True)
+                lbl = lbl.reshape(N,sweep,-1)[:,0,:]
+            else:
+                act = act.transpose(0,2,1).reshape(-1,1000,1)
+                lbl = lbl.reshape(N*sweep,-1)
+        else:
+
+            act = np.load(k / "weights_collapsed.npy") if collapsed else np.load(k / "weights.npy")
+            lbl = np.load(k / "labels.npy")
+                
+            # Handle both (N, sweeps, 1000, n_exp) and (N, 1000, n_exp)
             
-        # Handle both (N, sweeps, 1000, n_exp) and (N, 1000, n_exp)
+            if act.ndim == 4:
+                _, _, T, n_exp = act.shape
+                act = act.reshape(N * sweep, T, n_exp)
+                lbl = lbl.reshape(N*sweep,-1)
+            elif act.ndim == 3:
+                lbl = lbl.reshape(N,sweep,-1)[:,0,:]  # (N, 4)
+            
         
-        if act.ndim == 4:
-            # (N_concentrations, sweeps, 1000, n_exp) → (N_concentrations*sweeps, 1000, n_exp)
-            N, sweeps, T, n_exp = act.shape
-            act = act.reshape(N * sweeps, T, n_exp)
-            # labels: reshape to (N, sweeps, 4) then flatten to (N*sweeps, 4)
-            lbl = lbl.reshape(N, sweeps, -1)[:, 0, :]  # all sweeps share same label → take first
-            lbl = np.repeat(lbl, sweeps, axis=0)        # (N*sweeps, 4)
-        elif act.ndim == 3:
-            # (N_concentrations, 1000, n_exp) → already correct shape
-            N = act.shape[0]
-            lbl = lbl.reshape(N, -1)  # (N, 4)
-            lbl = lbl[:,0:4]
-        
-    
         act_arr.append(act)
         lbl_arr.append(lbl)
 
@@ -65,8 +81,10 @@ def get_activation_label_pair(paths, collapsed= True):
 
     return  np.concatenate(act_arr, axis=0),  np.concatenate(lbl_arr, axis=0)
 
-def load_activation_data(paths, batch_size=8, shuffle=True, num_workers=0, collapsed=True, ret_np = False):
-    act_arr, lbl_arr = get_activation_label_pair(paths, collapsed=collapsed)
+
+
+def load_activation_data(path_folder, batch_size=8, shuffle=True, num_workers=0, collapsed=True,volta=False, ret_np = False):
+    act_arr, lbl_arr = get_activation_label_pair(path_folder=path_folder, collapsed=collapsed,volta=volta)
     
     print("Expert activation set shape:", act_arr.shape)
     print("Labels shape:", lbl_arr.shape)
