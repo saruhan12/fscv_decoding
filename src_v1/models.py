@@ -2,6 +2,24 @@ import torch
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
+
+class DynamixClassifier(nn.Module):
+    def __init__(self, dynamix_model, n_classes=4,  freeze_exp=True, freeze_gating=False):
+        self.dynamix = dynamix_model
+
+        if freeze_exp:
+            for param in self.dynamix.experts.parameters():
+                param.required_grad=False
+
+        if freeze_gating:
+            for param in self.dynamix.gating_network.parameters():
+                param.required_grad=False
+        n_exp_params = int(len([i for i in self.dynamix.experts.parameters()])/3)
+
+        self.n_exp = n_exp_params
+        pass
+
+
 class Regressor(nn.Module):
     def __init__(self, n_exp, n_neuromodul,hidden_dim1=64, hidden_dim2=128, pooling='attention'):
         super().__init__()

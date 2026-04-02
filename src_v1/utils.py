@@ -3,7 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from pathlib import Path
 from sklearn.model_selection import train_test_split
-
+import re
 
 MONO_DOM_LIST = {0:'DA', 1:'5HT', 2:'NE', 3:'EQ'}
 
@@ -36,8 +36,7 @@ class ActivationData(Dataset):
         return torch.tensor(self.activation[index], dtype=torch.float32), torch.tensor(self.label[index], dtype=torch.float32), torch.tensor(self.concentration[index], dtype=torch.float32) 
     
 def get_activation_label_pair(path_folder, collapsed = True, volta=False):
-    act_arr = []
-    lbl_arr = []
+    act_arr, lbl_arr, probe_arr = [], [], []
     
     paths = get_all_paths(path_folder=path_folder,collapsed=collapsed,volta=volta)
 
@@ -49,6 +48,18 @@ def get_activation_label_pair(path_folder, collapsed = True, volta=False):
     for k in paths:
         shape_get = np.load(k / "voltammograms.npy")
         N, T, sweep = shape_get.shape
+
+        parts = Path(k).parts
+        root_idx = next(i for i, p in enumerate(parts) if 'data_1d_vxlbl' in p)
+        experiment = parts[root_idx + 1]  # e.g. AFOR, BFvsALC, ALCIS_155
+
+        import re
+        session_folder = str(k)
+        match = re.search(r'(ALC\w*|BFA\w*)_INM\d+_\w+', session_folder)
+        probe_name = match.group(0) if match else str(k)
+
+        probe_id = f"{experiment}__{probe_name}"
+
         if volta:
             act = np.load(k / "voltammograms.npy")
             lbl = np.load(k / "labels.npy")
@@ -72,19 +83,22 @@ def get_activation_label_pair(path_folder, collapsed = True, volta=False):
             elif act.ndim == 3:
                 lbl = lbl.reshape(N,sweep,-1)[:,0,:]  # (N, 4)
             
-        
+        n=len(act)
+        probe_arr.append(np.full(n,probe_id))
         act_arr.append(act)
         lbl_arr.append(lbl)
 
     print(f'First activation shape{act_arr[0].shape}')
     print(f'First label shape{lbl_arr[0].shape}')
 
-    return  np.concatenate(act_arr, axis=0),  np.concatenate(lbl_arr, axis=0)
+    return  np.concatenate(act_arr, axis=0),  np.concatenate(lbl_arr, axis=0), np.concatenate(probe_arr)
 
 
 
-def load_activation_data(path_folder, batch_size=8, shuffle=True, num_workers=0, collapsed=True,volta=False, ret_np = False):
-    act_arr, lbl_arr = get_activation_label_pair(path_folder=path_folder, collapsed=collapsed,volta=volta)
+def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=True, num_workers=0, collapsed=True,volta=False, ret_np = False):
+    #Given a directory that contains the activations, it returns the time series(either expert activations or raw voltammograms)
+    # labels for each(concentration and dominant monoamine), in train/test/val split.
+    act_arr, lbl_arr, probe_arr = get_activation_label_pair(path_folder=path_folder, collapsed=collapsed,volta=volta)
     
     print("Expert activation set shape:", act_arr.shape)
     print("Labels shape:", lbl_arr.shape)
@@ -105,41 +119,48 @@ def load_activation_data(path_folder, batch_size=8, shuffle=True, num_workers=0,
     lbl_cat = np.array(lbl_cat)
         
 
-    n_samples = act_arr.shape[0]
-    indices = np.arange(n_samples)
+    unique_probes = np.unique(probe_arr)
+    print(f"\nAvailable probe IDs:\n{unique_probes}")
 
-    train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
-    train_idx, val_idx  = train_test_split(train_idx, test_size=0.1, random_state=42)
+    if test_probe is None:
+        rng = np.random.default_rng(42)
+        test_probe = rng.choice(unique_probes)
+        print(f"No test_probe specified — randomly selected: {test_probe}")
+    else:
+        assert test_probe in unique_probes, \
+            f"test_probe '{test_probe}' not found. Available: {unique_probes}"
 
-    X_train, y_train, y_lbl_train = act_arr[train_idx], lbl_arr[train_idx], lbl_cat[train_idx] 
-    X_val,   y_val, y_lbl_val   = act_arr[val_idx],   lbl_arr[val_idx], lbl_cat[val_idx]
-    X_test,  y_test, y_lbl_test  = act_arr[test_idx],  lbl_arr[test_idx], lbl_cat[test_idx]
+    print(f"Test probe:  {test_probe}")
+    print(f"Train probes: {[p for p in unique_probes if p != test_probe]}")
 
-    # Normalize X
+    train_mask = probe_arr != test_probe
+    test_mask  = probe_arr == test_probe
+
+    X_train, y_train, y_lbl_train = act_arr[train_mask], lbl_arr[train_mask], lbl_cat[train_mask]
+    X_test,  y_test,  y_lbl_test  = act_arr[test_mask],  lbl_arr[test_mask],  lbl_cat[test_mask]
+
+    # Normalize X (fit on train only)
     x_mean = X_train.mean(axis=0)
     x_std  = X_train.std(axis=0)
     X_train_norm = (X_train - x_mean) / (x_std + 1e-8)
-    X_val_norm   = (X_val   - x_mean) / (x_std + 1e-8)
     X_test_norm  = (X_test  - x_mean) / (x_std + 1e-8)
 
-    # Normalize y
-    
+    # Normalize y (fit on train only)
     y_mean = y_train.mean(axis=0)
     y_std  = y_train.std(axis=0)
     print(f"y_mean: {y_mean}  y_std: {y_std}")
-        
+
     y_train_norm = (y_train - y_mean) / (y_std + 1e-8)
-    y_val_norm   = (y_val   - y_mean) / (y_std + 1e-8)
     y_test_norm  = (y_test  - y_mean) / (y_std + 1e-8)
 
     if ret_np:
-        return (X_train_norm, y_lbl_train, y_train_norm), (X_val_norm, y_lbl_val, y_val_norm), (X_test_norm, y_lbl_test, y_test_norm), y_mean, y_std, MONO_DOM_LIST 
-    else: 
-        train_dataloader = DataLoader(ActivationData(X_train_norm, y_lbl_train, y_train_norm),
-                                  batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
-        val_dataloader   = DataLoader(ActivationData(X_val_norm, y_lbl_val,   y_val_norm),
-                                        batch_size=batch_size, shuffle=False,   num_workers=num_workers)
-        test_dataloader  = DataLoader(ActivationData(X_test_norm, y_lbl_test,  y_test_norm),
-                                        batch_size=batch_size, shuffle=False,   num_workers=num_workers)
-        return train_dataloader, val_dataloader, test_dataloader, y_mean, y_std, MONO_DOM_LIST
+        return (X_train_norm, y_lbl_train, y_train_norm), \
+               (X_test_norm,  y_lbl_test,  y_test_norm), \
+               y_mean, y_std, MONO_DOM_LIST, test_probe
+    else:
+        train_dl = DataLoader(ActivationData(X_train_norm, y_lbl_train, y_train_norm),
+                              batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
+        test_dl  = DataLoader(ActivationData(X_test_norm,  y_lbl_test,  y_test_norm),
+                              batch_size=batch_size, shuffle=False,   num_workers=num_workers)
+        return train_dl, test_dl, y_mean, y_std, MONO_DOM_LIST, test_probe      
     
