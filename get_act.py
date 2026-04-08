@@ -5,18 +5,18 @@ import sys
 import argparse
 from tqdm import tqdm
 
-sys.path.append('../DynaMix-python_vWorks')
+sys.path.append('../../DynaMix-python_vWorks')
+CL = 9000
 
 from src.model.forecaster import DynaMixForecaster
 from src.utilities.utilities import load_hf_model
 
 # ===== CONFIG =====
-DATA_ROOT = "/Users/saru/Local_Work/neuromodul/fscv/tests_code/data_1d_vxlbl"
-CL = 9000   # context length fed to DynaMix
+DATA_ROOT = "/home/sgurbuz/nasShare/projects/sgurbuz/dynamix_tryout/data_1d_vxlbl"
 
 
 
-def inference(collapse=True, step=10):
+def inference(collapse=True, step=1000):
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -33,12 +33,18 @@ def inference(collapse=True, step=10):
     model = model.to(device)
     forecaster = DynaMixForecaster(model)
     print("Model ready.\n")
-
+    print(f"Collapsed:  {collapse}")
     # ===== INFERENCE LOOP =====
     volt_paths = sorted(Path(DATA_ROOT).rglob("voltammograms.npy"))
     print(f"Found {len(volt_paths)} voltammogram file(s).\n")
     T=step
     for volt_path in tqdm(volt_paths, desc='Files',leave=False):
+
+        out_path = volt_path.parent / "weights_collapsed.npy" if collapse else volt_path.parent / "weights.npy"
+        if out_path.exists():
+            print(f" skipping {volt_path.parent} (weights already exist)\n")
+            continue
+
         V = np.load(str(volt_path))  # shape (N_trials, T=1000, S=sweeps)
         N_trials, _, S = V.shape
         
@@ -100,7 +106,6 @@ def inference(collapse=True, step=10):
         # final shape: (N_trials, S, T, n_experts)
         weights_arr = np.stack(all_weights, axis=0)
 
-        out_path = volt_path.parent / f"weights_collapsed_{step}steps.npy" if collapse else volt_path.parent / f"weights_fulltime_{step}steps.npy" 
         np.save(str(out_path), weights_arr)
         print(f"  → weights saved: {out_path}  shape={weights_arr.shape}\n")
 
@@ -108,8 +113,8 @@ def inference(collapse=True, step=10):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--collapse', type=lambda x: x.lower() == 'true', default=True)
-    parser.add_argument('--step', type=int, default=10)
+    parser.add_argument('--collapse', type=lambda x: x.lower() == 'true', default=False)
+    parser.add_argument('--step', type=int, default=1000)
 
     args = parser.parse_args()
 

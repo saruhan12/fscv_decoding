@@ -95,7 +95,7 @@ def get_activation_label_pair(path_folder, collapsed = True, volta=False):
 
 
 
-def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=True, num_workers=0, collapsed=True,volta=False, ret_np = False):
+def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=True, num_workers=0, collapsed=True,volta=False, ret_np = False, classification=True):
     #Given a directory that contains the activations, it returns the time series(either expert activations or raw voltammograms)
     # labels for each(concentration and dominant monoamine), in train/test/val split.
     act_arr, lbl_arr, probe_arr = get_activation_label_pair(path_folder=path_folder, collapsed=collapsed,volta=volta)
@@ -106,15 +106,24 @@ def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=Tru
     # Drop pH, keep DA/5HT/NE 
     print("First label row (all 4 cols):", lbl_arr[0])
 
-    lbl_arr = lbl_arr[:, :3]  # (N, 3)
+    
     
         #check max
         #if at least 2 max then assign EQ(3)
     lbl_cat = []
+    valid_mask = []
     for k in lbl_arr:
         max = np.max(k)
         tie = np.sum(k==max) >=2
-        lbl_cat.append(3 if tie else np.argmax(k))
+        if tie or np.argmax(k)==3:
+            valid_mask.append(False if classification else True)
+            lbl_cat.append(-1)
+        else:
+            lbl_cat.append(np.argmax(k))
+            valid_mask.append(True)
+
+    valid_mask = np.array(valid_mask)
+
 
     lbl_cat = np.array(lbl_cat)
         
@@ -133,8 +142,15 @@ def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=Tru
     print(f"Test probe:  {test_probe}")
     print(f"Train probes: {[p for p in unique_probes if p != test_probe]}")
 
+    act_arr = act_arr[valid_mask]#weight activation
+    lbl_arr = lbl_arr[valid_mask]#concentrations
+    lbl_cat = lbl_cat[valid_mask]#dominant neuromodulator
+    probe_arr = probe_arr[valid_mask]
+
     train_mask = probe_arr != test_probe
     test_mask  = probe_arr == test_probe
+
+
 
     X_train, y_train, y_lbl_train = act_arr[train_mask], lbl_arr[train_mask], lbl_cat[train_mask]
     X_test,  y_test,  y_lbl_test  = act_arr[test_mask],  lbl_arr[test_mask],  lbl_cat[test_mask]
