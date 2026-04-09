@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import argparse
 from tqdm import tqdm
-
+import time
 sys.path.append('../../DynaMix-python_vWorks')
 CL = 9000
 
@@ -16,7 +16,7 @@ DATA_ROOT = "/home/sgurbuz/nasShare/projects/sgurbuz/dynamix_tryout/data_1d_vxlb
 
 
 
-def inference(collapse=True, step=1000):
+def inference(collapse=True, step=1000, model_d=3):
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -25,10 +25,13 @@ def inference(collapse=True, step=1000):
         device = torch.device("cpu")
         
     print(f"Using device: {device}")
-
+    
     # ===== LOAD MODEL ONCE =====
+    model_name = "dynamix-3d-alrnn-v1.0" if model_d==3 else "dynamix-6d-alrnn-v1.0"
     print("Loading model...")
-    model = load_hf_model("dynamix-6d-alrnn-v1.0")
+    print(f"Dynamix reconstruct  model: {model_name} ")
+    time.sleep(3.0)
+    model = load_hf_model(model_name)
     model.eval()
     model = model.to(device)
     forecaster = DynaMixForecaster(model)
@@ -40,7 +43,11 @@ def inference(collapse=True, step=1000):
     T=step
     for volt_path in tqdm(volt_paths, desc='Files',leave=False):
 
-        out_path = volt_path.parent / "weights_collapsed.npy" if collapse else volt_path.parent / "weights.npy"
+        if model_d == 3:
+            out_path = volt_path.parent / "weights_collapsed_3d.npy" if collapse else volt_path.parent / "weights_3d.npy"
+        else:
+            out_path = volt_path.parent / "weights_collapsed.npy" if collapse else volt_path.parent / "weights.npy"
+
         if out_path.exists():
             print(f" skipping {volt_path.parent} (weights already exist)\n")
             continue
@@ -115,10 +122,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--collapse', type=lambda x: x.lower() == 'true', default=False)
     parser.add_argument('--step', type=int, default=1000)
-
+    parser.add_argument('--dim',type=int, default=3)
     args = parser.parse_args()
 
-    inference(collapse=args.collapse,step=args.step)
+    inference(collapse=args.collapse,step=args.step,model_d=args.dim)
 
 
 if __name__ == '__main__':
