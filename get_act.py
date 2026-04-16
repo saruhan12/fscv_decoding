@@ -12,7 +12,7 @@ from src.model.forecaster import DynaMixForecaster
 from src.utilities.utilities import load_hf_model
 
 # ===== CONFIG =====
-DATA_ROOT = "/home/sgurbuz/nasShare/projects/sgurbuz/dynamix_tryout/data_1d_vxlbl"
+DATA_ROOT = "/home/sgurbuz/nasShare/projects/sgurbuz/dynamix_tryout/data_1d_vxlbl/ALCIS_155_macroREF"
 
 
 

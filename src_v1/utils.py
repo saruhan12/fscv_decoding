@@ -7,20 +7,22 @@ import re
 
 MONO_DOM_LIST = {0:'DA', 1:'5HT', 2:'NE', 3:'EQ'}
 
-def get_all_paths(path_folder, collapsed=True, steps=None, volta=False):
+def get_all_paths(path_folder, collapsed=True, steps=None, volta=False, model_dim='3d'):
     path = Path(path_folder)
+    model_last = '_'+model_dim if model_dim else ''
     if steps:
         if volta:
             search = path.rglob("voltammograms.npy")
         else:
-            search = path.rglob(f"weights_collapsed_{steps}steps.npy")if collapsed else path.rglob(f"weights_{steps}steps.npy")
+            search = path.rglob(f"weights_collapsed_{steps}steps{model_last}.npy")if collapsed else path.rglob(f"weights_{steps}steps{model_last}.npy")
     else:
         if volta:
             search = path.rglob("voltammograms.npy")
         else:
-            search = path.rglob("weights_collapsed.npy")if collapsed else path.rglob("weights.npy")
+            search = path.rglob(f"weights_collapsed{model_last}.npy")if collapsed else path.rglob(f"weights{model_last}.npy")
     weight_paths = [p.parent for p in search]
-
+    
+    print(f"Found {len(weight_paths)} paths")
     return weight_paths
     
 
@@ -35,10 +37,10 @@ class ActivationData(Dataset):
     def __getitem__(self, index):
         return torch.tensor(self.activation[index], dtype=torch.float32), torch.tensor(self.label[index], dtype=torch.float32), torch.tensor(self.concentration[index], dtype=torch.float32) 
     
-def get_activation_label_pair(path_folder, collapsed = True, volta=False):
+def get_activation_label_pair(path_folder, collapsed = True, volta=False,model_dim='3d'):
     act_arr, lbl_arr, probe_arr = [], [], []
-    
-    paths = get_all_paths(path_folder=path_folder,collapsed=collapsed,volta=volta)
+    model_last = '_'+model_dim if model_dim else ''
+    paths = get_all_paths(path_folder=path_folder,collapsed=collapsed,volta=volta,model_dim=model_dim)
 
     if collapsed:
         print('Getting pairs collapsed.')
@@ -71,7 +73,7 @@ def get_activation_label_pair(path_folder, collapsed = True, volta=False):
                 lbl = lbl.reshape(N*sweep,-1)
         else:
 
-            act = np.load(k / "weights_collapsed.npy") if collapsed else np.load(k / "weights.npy")
+            act = np.load(k / f"weights_collapsed{model_last}.npy") if collapsed else np.load(k / f"weights{model_last}.npy")
             lbl = np.load(k / "labels.npy")
                 
             # Handle both (N, sweeps, 1000, n_exp) and (N, 1000, n_exp)
@@ -95,27 +97,45 @@ def get_activation_label_pair(path_folder, collapsed = True, volta=False):
 
 
 
-def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=True, num_workers=0, collapsed=True,volta=False, ret_np = False, classification=True):
+def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=True, num_workers=0, collapsed=True,volta=False, ret_np = False, classification=True,model_dim='3d'):
     #Given a directory that contains the activations, it returns the time series(either expert activations or raw voltammograms)
     # labels for each(concentration and dominant monoamine), in train/test/val split.
-    act_arr, lbl_arr, probe_arr = get_activation_label_pair(path_folder=path_folder, collapsed=collapsed,volta=volta)
+    act_arr, lbl_arr, probe_arr = get_activation_label_pair(path_folder=path_folder, collapsed=collapsed,volta=volta,model_dim=model_dim)
     
     print("Expert activation set shape:", act_arr.shape)
     print("Labels shape:", lbl_arr.shape)
     
     # Drop pH, keep DA/5HT/NE 
-    print("First label row (all 4 cols):", lbl_arr[0])
+    #print("First label row (all 4 cols):", lbl_arr[0])
 
     
     
         #check max
         #if at least 2 max then assign EQ(3)
+    probe_valid_counts = {}
+    for p, k in zip(probe_arr, lbl_arr):
+        max_val = np.max(k)
+        tie = np.sum(k == max_val) >= 2
+        is_valid = not (tie or np.argmax(k) == 3)
+        probe_valid_counts[p] = probe_valid_counts.get(p, 0) + (1 if is_valid else 0)
+
+    probes_to_keep = np.array([p for p, count in probe_valid_counts.items() if count > 0])
+    removed_probes = [p for p, count in probe_valid_counts.items() if count == 0]
+    print(f"Removed probes (all EQ/pH): {removed_probes}")
+
+    # Step 2: remove empty probes from all arrays
+    probe_keep_mask = np.isin(probe_arr, probes_to_keep)
+    act_arr   = act_arr[probe_keep_mask]
+    lbl_arr   = lbl_arr[probe_keep_mask]
+    probe_arr = probe_arr[probe_keep_mask]
+
+    # Step 3: apply valid_mask (remove EQ and pH samples)
     lbl_cat = []
     valid_mask = []
     for k in lbl_arr:
-        max = np.max(k)
-        tie = np.sum(k==max) >=2
-        if tie or np.argmax(k)==3:
+        max_val = np.max(k)
+        tie = np.sum(k == max_val) >= 2
+        if tie or np.argmax(k) == 3:
             valid_mask.append(False if classification else True)
             lbl_cat.append(-1)
         else:
@@ -123,13 +143,23 @@ def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=Tru
             valid_mask.append(True)
 
     valid_mask = np.array(valid_mask)
-
-
     lbl_cat = np.array(lbl_cat)
-        
 
+    act_arr   = act_arr[valid_mask]
+    lbl_arr   = lbl_arr[valid_mask]
+    lbl_cat   = lbl_cat[valid_mask]
+    probe_arr = probe_arr[valid_mask]
+
+    # Add this after valid_mask is applied, for debugging
+    print("\nPer-probe sample counts after filtering:")
+    for p in np.unique(probe_arr):
+        n = np.sum(probe_arr == p)
+        print(f"  {p}: {n} samples")
+    print(f"Total valid samples: {len(probe_arr)}")
+
+    # Step 4: probe selection
     unique_probes = np.unique(probe_arr)
-    print(f"\nAvailable probe IDs:\n{unique_probes}")
+    print(f"Available probe IDs:\n{unique_probes}")
 
     if test_probe is None:
         rng = np.random.default_rng(42)
@@ -140,13 +170,8 @@ def load_activation_data(path_folder, test_probe=None, batch_size=8, shuffle=Tru
             f"test_probe '{test_probe}' not found. Available: {unique_probes}"
 
     print(f"Test probe:  {test_probe}")
-    print(f"Train probes: {[p for p in unique_probes if p != test_probe]}")
-
-    act_arr = act_arr[valid_mask]#weight activation
-    lbl_arr = lbl_arr[valid_mask]#concentrations
-    lbl_cat = lbl_cat[valid_mask]#dominant neuromodulator
-    probe_arr = probe_arr[valid_mask]
-
+    #print(f"Train probes: {[p for p in unique_probes if p != test_probe]}")
+    
     train_mask = probe_arr != test_probe
     test_mask  = probe_arr == test_probe
 
