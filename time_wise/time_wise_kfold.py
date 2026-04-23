@@ -39,14 +39,15 @@ def logreg_classifier(train, test):
     return acc_over_t
 
 
-def k_fold_decoding(probe_list,model_dim='3d',collapsed=True):
+def k_fold_decoding(probe_list,model_dim='3d',collapsed=True, volta=False):
     all_acc_curves = []
     for test_probe in probe_list:
         train, test, _, _, _, _ = utils.load_activation_data(weights_paths,
                     test_probe=test_probe,
                     ret_np=True,
                     model_dim=model_dim,
-                    collapsed=collapsed
+                    collapsed=collapsed,
+                    volta=volta
                     )
         acc_t = logreg_classifier(train, test)
         all_acc_curves.append(acc_t)
@@ -55,5 +56,5 @@ def k_fold_decoding(probe_list,model_dim='3d',collapsed=True):
 
 #acc_over_t_collapsed_over_electrode = k_fold_decoding(probe_list=probes, model_dim=None)
 #np.save('k_fold_acc_over_t_collapsed_over_electrode_6d.npy',acc_over_t_collapsed_over_electrode)
-acc_over_t_full =  k_fold_decoding(probe_list=probes,collapsed=False)
-np.save('k_fold_acc_over_t_full_3d.npy',acc_over_t_full)
+acc_over_t_full =  k_fold_decoding(probe_list=probes,collapsed=False,volta=True)
+np.save('k_fold_acc_over_t_full_raw_volta.npy',acc_over_t_full)

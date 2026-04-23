@@ -47,6 +47,9 @@ def get_activation_label_pair(path_folder, collapsed = True, volta=False,model_d
     else:
         print('Getting pairs not collapsed.')
 
+    if volta:
+        print('Getting raw voltammograms')
+
     for k in paths:
         shape_get = np.load(k / "voltammograms.npy")
         N, T, sweep = shape_get.shape
