@@ -8,6 +8,7 @@ from tqdm import tqdm
 import pickle
 from pathlib import Path
 
+import argparse 
 
 import utils 
 
@@ -148,6 +149,7 @@ def k_fold_decoding(probe_list,model_dim='3d',collapsed=True, volta=False):
         all_acc_curves.append(acc_t)
 
     return np.array(all_acc_curves)
+
 def per_probe_regression(probe_id, model_last='3d', collapsed=False, volta=False,
                          alpha=1.0, n_splits=5, random_state=42, combined = False):
     """
@@ -164,7 +166,6 @@ def per_probe_regression(probe_id, model_last='3d', collapsed=False, volta=False
       y_stds:       (n_splits, n_targets)
       probe_id:     str
     """
-    # Single load — recover raw y via inverse of the loader's normalization.
     
     train, _, test, y_mean_loader, y_std_loader, _, _, _= utils.load_activation_data(
             weights_paths,
@@ -180,12 +181,6 @@ def per_probe_regression(probe_id, model_last='3d', collapsed=False, volta=False
     X_full = np.concatenate([train[0], test[0]], axis=0)
     y_full_norm = np.concatenate([train[2], test[2]], axis=0)
     y_full_raw  = y_full_norm * (y_std_loader + 1e-8) + y_mean_loader
-
-    # Note on X: the loader normalized X using stats from its internal 80/20 train
-    # split, not from each k-fold train set. For a strictly clean k-fold we'd
-    # re-normalize X per fold using only that fold's training data. Within a single
-    # probe the X distribution is fairly stable across folds, so this is a small
-    # leak — fine for now, fix when the loader exposes x_mean/x_std.
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     n_targets = y_full_raw.shape[1]
@@ -240,10 +235,11 @@ def per_probe_regression(probe_id, model_last='3d', collapsed=False, volta=False
 #np.save('k_fold_acc_over_t_collapsed_over_electrode_6d.npy',acc_over_t_collapsed_over_electrode)
 
 
-def full_reg(model_last = '3d', collapsed=False, alpha = 1.0, volta=False, combined=True):
+def full_reg(out_path, model_last = '3d', collapsed=False, alpha = 1.0, volta=False, combined=True):
+
     folder_tag = "combined" if combined else ""
 
-    out_dir = Path(f"./kfold_{folder_tag}") 
+    out_dir = Path(f"{out_path}/kfold_{folder_tag}") 
 
     for i, tag in probe_tags.items():
         if combined:
@@ -278,7 +274,17 @@ def collapsed_reg():
 if __name__ == '__main__':
     #collapsed_reg()
     #full_reg(combined=True)
-    
-    out = per_probe_regression(probe_id=probes[1], model_last='fine_tune_2_epoch50', combined=False)
+    parser = argparse.ArgumentParser(description='Time Wise Decoding')
+    parser.add_argument('--out_path', required=True, help='Path to save the results of regression')
+    parser.add_argument('--probe_id', required=False, help='Probe ID, look at the list at the top to see which is which', default=None)
+    parser.add_argument('--regtype', required=True, choices=['full', 'single'],help='Full(over all probes) or a single probe regression')
+    parser.add_argument('--model_last', required=True, help='which type of models weights should be used, example: fine_tune_0 if weights are saved in the name weights_fine_tune_0.npy')
+    parser.add_argument('--combined', action='store_true', default=False, help='if you want to use concatenated voltammograms and weights.')
+    parser.add_argument('--volta', action='store_true', default=False, help='To use preprocessed voltammograms for decoding.')
 
-    save_per_probe(out=out, path="/home/sgurbuz/nasShare/projects/sgurbuz/dynamix_tryout/dyna_test/fscv_decoding/time_wise/alc2_finetune_2_epoch50/kfold_reg_over_t_fullActivationsFineTune2E50_alc2.npz")
+    args = parser.parse_args()
+    if args.regtype == 'single':
+        out = per_probe_regression(probe_id=args.probe_id, model_last=args.model_last, combined=args.combined, volta=args.volta)
+        save_per_probe(out=out, path= f"{args.out_path}/kfold_reg_over_t_full_{args.probe_id}_{args.model_last}.npz")
+    else:
+        full_reg(out_path=args.out_path, model_last=args.model_last, combined=args.combined, volta=args.volta)

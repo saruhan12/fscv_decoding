@@ -2,7 +2,7 @@
 *.png
 *.jpeg
 *.npz
-/decoding_core/utils_finetune.py
+
 *.pt
 .DS_Store
 /plots/
@@ -11,3 +11,6 @@
 /results/*
 /fscv_decoding.egg-info/
 /fscv_decoding.egg-info/*
+/decoding_core/__pycache__/
+*.py[codz]
+*$py.class
