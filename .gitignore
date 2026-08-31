@@ -1,3 +1,11 @@
 *.npy
 *.png
 *.jpeg
+*.npz
+*.pt
+/plots/
+/results/
+/plots/*
+/results/*
+/fscv_decoding.egg-info/
+/fscv_decoding.egg-info/*
