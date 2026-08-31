@@ -7,3 +7,11 @@ This repository is the output of the work done to study the use of [Dynamix](htt
 - shape_metrics: Certain distance metric implementations for comparing the expert activations of different Dynamix models during forecasting.
 - time_wise_kfold.py: KFold regression over time using linear regression.
 - utils.py: Utility functions for loading/manipulating FSCV data.
+
+
+## Install 
+
+To install the decoding core in your current Python environment:
+```bash
+    pip install -e .
+```
