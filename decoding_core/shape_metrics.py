@@ -7,6 +7,15 @@ import ot
 w = ot.unif(1000)
 
 def w2_matrix(A):
+    """
+    2-Wasserstein squared distance on a matrix of arbitrary shape.
+
+    Input:
+        A: The matrix of interest, the distance matrix will be the distance between the elements(rows) of A
+
+    Output:
+        D: 2-Wasserstein squared distance between elements.
+    """
     N = len(A)
     D = np.zeros((N, N))
     for i in range(N):
@@ -21,6 +30,16 @@ def std_global(A):
     return (A - f.mean(0)) / np.maximum(f.std(0), 1e-3)
 
 def procrustes_matrix(A):
+    """
+        Procrustes distance on a matrix of arbitrary shape. Invariant to rotation, thus not useful when studyig the 
+        activaitons of the experts.
+    
+        Input:
+            A: The matrix of interest, the distance matrix will be the distance between the elements(rows) of A
+    
+        Output:
+            D: Procrustes distance between elements.
+        """
     N = len(A)
     D = np.zeros((N,N))
     for i in range(N):

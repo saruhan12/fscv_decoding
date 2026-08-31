@@ -2,6 +2,7 @@
 *.png
 *.jpeg
 *.npz
+/decoding_core/utils_finetune.py
 *.pt
 .DS_Store
 /plots/

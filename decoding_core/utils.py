@@ -4,8 +4,8 @@ from statsmodels.tsa.stattools import acf
 from scipy import stats
 from scipy.signal import find_peaks
 
-from .preprocessing import estimate_pos_tau,estimate_tdm_tau,snap_tau_to_period,make_phis,apply_embedding
-from .preprocessing import make_sines as _make_sines_TB
+from preprocessing import estimate_pos_tau,estimate_tdm_tau,snap_tau_to_period,make_phis,apply_embedding
+from preprocessing import make_sines as _make_sines_TB
 import numpy as np
 import json
 from pathlib import Path
@@ -19,6 +19,10 @@ MODEL_LABELS = ["fine_tune",
                 "3d",
                 "6d"]
 
+
+"""
+    The paths given to the methods here should be precise, as methods will find and work with every subfolder of the input path. 
+"""
 
 
 # from .your_data_module import get_activation_label_pair   # already in scope
@@ -75,13 +79,9 @@ def spit_compliant_data(path_folder, out_path, probe_id_substr, volta=True,
                         save_labels=True, keep_round_lengths=True, verbose=True):
     """
     Within-probe, leave-MIXTURE-out split with a consistent embedding across
-    context / train / test.
+    context / train / test. 
 
-    keep_round_lengths : if True (default), an embedding that consumes history
-        (delay embeddings) is given extra tiled sweeps as burn-in and the result
-        is cropped back, so data/context/test keep lengths
-        sweep_len / rep*sweep_len / (rep+1)*sweep_len. Set False to get the old
-        behaviour (arrays shortened by n_extra*tau).
+    To finet-tune the dynamix models. 
     """
     acts, lbls, probes, paths = get_activation_label_pair(  # noqa: F821
         path_folder, collapsed=False, volta=volta, model_last=model_last)
@@ -228,172 +228,6 @@ def spit_compliant_data(path_folder, out_path, probe_id_substr, volta=True,
     return X_data, X_context, X_test, meta
 
 
-spit_complaint_data = spit_compliant_data
-
-"""
-
-def spit_compliant_data(path_folder, out_path, probe_id_substr, volta=True,
-                        test_frac=0.2, rep=9, seed=42, model_last='3d',
-                        n_dim=3, sweep_len=1000,
-                        embedding="pos_embedding", tau=None, phi_mode="random",
-                        tau_min=None, tau_max=None, snap_tau=True,
-                        save_labels=True, verbose=True):
-    
-    Within-probe, leave-MIXTURE-out split. Whole concentration combos are
-    assigned entirely to train / test, so identical replicate sweeps never
-    cross splits.
-
-    Channels 1..n_dim-1 carry the embedding (eq. 6 sines by default, or delay
-    coordinates), estimated ONCE on the standardized training sweeps and then
-    re-applied verbatim to context / train / test.
-
-    Parameters
-    ----------
-    embedding : "pos_embedding" | "zero_embedding" | "delay_embedding"
-                | "delay_embedding_random"
-    tau       : fixed tau; if None it is estimated from the untiled train sweeps
-    phi_mode  : "random" (draws once, saved to metadata) or "linspace"
-    snap_tau  : snap tau to a divisor of sweep_len so the sine channel stays
-                phase-coherent with the tiling (positional embedding only)
-    
-    acts, lbls, probes, paths = get_activation_label_pair(  # noqa: F821
-        path_folder, collapsed=False, volta=volta, model_last=model_last)
-
-    matches = [p for p in np.unique(probes) if probe_id_substr in p]
-    assert len(matches) == 1, f"probe match not unique: {matches}"
-    m = probes == matches[0]
-    X, Y = acts[m], lbls[m]
-    print(f"{matches[0]}: {len(X)} sweeps")
-
-    # --- group rows by mixture combo (stable integer key) ---
-    Yr = np.round(Y, 3)
-    _, combo_id = np.unique(Yr, axis=0, return_inverse=True)
-    combos = np.unique(combo_id)
-    print(f"{len(combos)} unique mixtures, ~{len(X) / len(combos):.0f} sweeps each")
-
-    # --- split the COMBOS, not the rows ---
-    rng = np.random.default_rng(seed)
-    perm = rng.permutation(combos)
-    n_test = int(len(perm) * test_frac)
-    test_c = set(perm[:n_test].tolist())
-    train_c = set(perm[n_test:].tolist())
-    assert not (test_c & train_c)
-
-    tr = np.array([c in train_c for c in combo_id])
-    te = np.array([c in test_c for c in combo_id])
-    print(f"combos -> train {len(train_c)}  test {len(test_c)}")
-    print(f"rows   -> train {tr.sum()}  test {te.sum()}")
-
-    # --- reshape to (T, B, 1) ---
-    X_data = np.swapaxes(X[tr].astype(np.float32).reshape(-1, sweep_len, 1), 0, 1)
-    X_test = np.swapaxes(X[te].astype(np.float32).reshape(-1, sweep_len, 1), 0, 1)
-
-    # tile the sweep along time
-    X_context = np.tile(X_data, (rep, 1, 1))          # (rep*sweep_len, B_tr, 1)
-    X_test    = np.tile(X_test, (rep + 1, 1, 1))      # ((rep+1)*sweep_len, B_te, 1)
-
-    # --- standardize on TRAIN only, BEFORE embedding ---
-    mu  = X_data.mean(axis=(0, 1), keepdims=True)
-    std = np.maximum(X_data.std(axis=(0, 1), keepdims=True), 1e-6)
-
-    X_data    = (X_data    - mu) / std
-    X_context = (X_context - mu) / std
-    X_test    = (X_test    - mu) / std
-
-    # --- embedding parameters: estimated ONCE, on the untiled train sweeps ----
-    # Estimating on X_context would just recover the tiling period, since
-    # np.tile makes the context exactly periodic with sweep_len.
-    n_extra = n_dim - X_data.shape[2]
-    params = {"method": embedding}
-
-    if embedding == "pos_embedding":
-        if tau is None:
-            tau = estimate_pos_tau(
-                X_data,
-                min_lag=tau_min if tau_min is not None else max(2, sweep_len // 10),
-                max_lag=tau_max,
-                reduce="mean_acf",
-                seed=seed,
-            )
-        tau = int(tau)
-        if snap_tau:
-            snapped = snap_tau_to_period(tau, sweep_len)
-            if verbose and snapped != tau:
-                print(f"tau {tau} -> {snapped} (snapped to a divisor of {sweep_len})")
-            tau = snapped
-        phis = make_phis(n_extra, mode=phi_mode, rng=rng)
-        params.update({"tau": tau, "phis": phis, "t0": 0})
-        print(f"tau = {tau}   phis = {np.round(phis, 4)}")
-
-    elif embedding.startswith("delay_embedding"):
-        if embedding == "delay_embedding":
-            if tau is None:
-                tau = estimate_tdm_tau(X_data, channel=-1, reduce="median", seed=seed)
-            params.update({"tau": int(tau), "source_channel": -1})
-            print(f"delay tau = {int(tau)}  (trim = {n_extra * int(tau)} steps)")
-        else:
-            params.update({"source_channel": 0})
-
-    # --- apply the SAME embedding to every split ----------------------------
-    X_data,    params = apply_embedding(X_data,    n_dim, embedding, params=params)
-    X_context, _      = apply_embedding(X_context, n_dim, embedding, params=params)
-    X_test,    _      = apply_embedding(X_test,    n_dim, embedding, params=params)
-
-    print(f"Context shape: {X_context.shape}")
-    print(f"Data shape:    {X_data.shape}")
-    print(f"Test shape:    {X_test.shape}")
-    for name, A in [("data", X_data), ("context", X_context), ("test", X_test)]:
-        assert np.isfinite(A).all(), f"{name} has non-finite values"
-        assert A.shape[2] == n_dim, f"{name} has {A.shape[2]} channels, expected {n_dim}"
-        print(f"  {name}: absmax {np.abs(A).max():.3f}  "
-              f"per-channel std {np.round(A.std(axis=(0, 1)), 3)}")
-
-    # sanity check: data channel of the context must match the tiled train data
-    reps_in_context = X_context.shape[0] // X_data.shape[0]
-    if embedding == "pos_embedding" and reps_in_context >= 1:
-        assert np.allclose(X_context[:X_data.shape[0], :, 0], X_data[:, :, 0]), \
-            "context/data mismatch on the observed channel"
-
-    np.save(out_path + "data.npy", X_data)
-    np.save(out_path + "context.npy", X_context)
-    np.save(out_path + "test.npy", X_test)
-
-    # labels are per sweep (B), so the time-axis trim of the delay embedding
-    # does not touch them; saving them keeps this split reusable downstream.
-    if save_labels:
-        np.save(out_path + "labels_train.npy", Y[tr].astype(np.float32))
-        np.save(out_path + "labels_test.npy",  Y[te].astype(np.float32))
-        np.save(out_path + "combo_id_train.npy", combo_id[tr])
-        np.save(out_path + "combo_id_test.npy",  combo_id[te])
-
-    meta = {
-        "probe": matches[0],
-        "embedding": embedding,
-        "tau": int(params["tau"]) if params.get("tau") is not None else None,
-        "phis": np.asarray(params.get("phis", [])).tolist(),
-        "trim": int(params.get("trim", 0)),
-        "taus": [int(t) for t in params.get("taus", [])],
-        "snap_tau": bool(snap_tau),
-        "phi_mode": phi_mode,
-        "mu": float(mu.squeeze()),
-        "std": float(std.squeeze()),
-        "rep": rep,
-        "sweep_len": sweep_len,
-        "n_dim": n_dim,
-        "seed": seed,
-        "test_frac": test_frac,
-        "volta": volta,
-        "model_name": model_last,
-        "shapes": {"data": list(X_data.shape),
-                   "context": list(X_context.shape),
-                   "test": list(X_test.shape)},
-    }
-    with open(out_path + "embedding_meta.json", "w") as f:
-        json.dump(meta, f, indent=2)
-
-    return X_data, X_context, X_test, meta
-
-"""
 
 
 
@@ -519,21 +353,18 @@ def load_activation_data(path_folder=None, test_probe=None, probe_id=None,
     print("Activation shape:", act_arr.shape)
     print("Labels shape:", lbl_arr.shape)
 
-    # --- vectorized validity + categorical labels (col 3 = pH/blank -> EQ) ---
     max_val = lbl_arr.max(axis=1)
     tie     = (lbl_arr == max_val[:, None]).sum(axis=1) >= 2
     argmax  = lbl_arr.argmax(axis=1)
     is_eq_or_ph = tie | (argmax == 3)
     lbl_cat_full = np.where(is_eq_or_ph, -1, argmax).astype(np.int64)
 
-    # regression keeps every row; classification drops EQ/pH-dominant rows
     row_valid = np.ones(len(lbl_arr), bool) if not classification else ~is_eq_or_ph
 
     removed_probes = sorted(set(np.unique(probe_arr)) - set(np.unique(probe_arr[row_valid])))
     if removed_probes:
         print(f"Removed probes (no valid samples): {removed_probes}")
 
-    # single re-index, and only if something is actually dropped (skips a ~5 GB copy)
     if not row_valid.all():
         act_arr   = act_arr[row_valid]
         lbl_arr   = lbl_arr[row_valid]
@@ -643,52 +474,6 @@ def load_activation_data(path_folder=None, test_probe=None, probe_id=None,
                           batch_size=batch_size, shuffle=False, num_workers=num_workers)
     return train_dl, val_dl, test_dl, y_mean, y_std, y_shift, MONO_DOM_LIST, active_test_probe
 
-
-
-"""
-def combine_act(path_folder=None, collapsed=False, volta=True, model_last='3d'):
-    act_arr_f, _, _, paths = get_activation_label_pair(
-            path_folder=path_folder, collapsed=collapsed, volta=volta, model_last=model_last)
-    act_arr_s, _, _, _ = get_activation_label_pair(
-            path_folder=path_folder, collapsed=collapsed, volta= not volta, model_last=model_last)
-    
-    name = model_last
-    print(f"First got index 0 act shape {act_arr_f[0].shape}")
-    print(f"Got act len {len(act_arr_f)}")
-
-    #act_arr_dyna_split = np.split(act_arr_s, act_arr_s.shape[-1], axis=3) if volta else np.split(act_arr_f, act_arr_f.shape[-1], axis=3)  
-        
-    print("Got activation + volta pairs")
-
-    non_volta = act_arr_s if volta else act_arr_f
-    volta_arr = act_arr_f if volta else act_arr_s
-
-    print(f"Non volta shape at index 0: {non_volta[0].shape}")
-    act_arr_dyna_split = [np.split(act, act.shape[-1], axis=3) for act in non_volta]
-    
-    #act_arr_dyna_split.append(act_arr_f) if volta else act_arr_dyna_split.append(act_arr_s)
-
-    #act_arr = np.concatenate(act_arr_dyna_split, axis=2)
-
-    final = []
-    for i, arr in enumerate(act_arr_dyna_split):
-        k = arr
-        k.append(volta_arr[i])
-        final.append(np.concatenate(k, axis=3))
-    
-    print("Combined")
-    
-    for i, k in enumerate(paths):
-        out = k / f"combined_{name}.npy"
-        if Path(out).is_file():
-            print(f"Skipped {out}")
-            continue
-        else:
-            np.save(out, final[i])
-            print(f"saved to {out}, with shape {final[i].shape}")
-
-    return act_arr_dyna_split, volta_arr, paths
-"""
 
 def combine_act(path_folder=None, model_last='3d', overwrite=False):
     """

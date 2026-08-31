@@ -8,9 +8,8 @@ from tqdm import tqdm
 import pickle
 from pathlib import Path
 
-sys.path.append('..')
 
-import src_v1.utils as utils 
+import utils 
 
 weights_paths = "/home/sgurbuz/nasShare/projects/sgurbuz/dynamix_tryout/data_1d_vxlbl/ALCIS_155_macroREF"
 
