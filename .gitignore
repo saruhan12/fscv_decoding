@@ -3,6 +3,7 @@
 *.jpeg
 *.npz
 *.pt
+.DS_Store
 /plots/
 /results/
 /plots/*
